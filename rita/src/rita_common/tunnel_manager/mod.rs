@@ -4,23 +4,31 @@ use std::path::Path;
 
 use actix::actors;
 use actix::prelude::*;
+use actix::actors::mocker::Mocker;
 
 use futures;
 use futures::Future;
 
 use althea_types::LocalIdentity;
 
-use althea_kernel_interface::KI;
+use KI;
 
 use babel_monitor::Babel;
 
-use rita_common::http_client::{HTTPClient, Hello};
+use rita_common::http_client::{Hello};
+use rita_common;
 
 use settings::RitaCommonSettings;
 use SETTING;
 
 use failure::Error;
 use std::net::SocketAddrV4;
+
+#[cfg(test)]
+type HTTPClient = Mocker<rita_common::http_client::HTTPClient>;
+
+#[cfg(not(test))]
+type HTTPClient = rita_common::http_client::HTTPClient;
 
 #[derive(Debug, Fail)]
 pub enum TunnelManagerError {
@@ -278,7 +286,6 @@ impl TunnelManager {
                             Box::new(futures::future::err(
                                 TunnelManagerError::DNSLookupError.into(),
                             ))
-                                as ResponseFuture<(LocalIdentity, String, IpAddr), Error>
                         }
                     } else {
                         match their_ip.parse() {
@@ -358,8 +365,81 @@ impl TunnelManager {
 
 #[cfg(test)]
 mod tests {
+    use actix::*;
+    use futures::{future, Future};
+
+    use std::os::unix::process::ExitStatusExt;
+    use std::process::ExitStatus;
+    use std::process::Output;
+
+    use super::*;
+
+    use althea_kernel_interface::KernelInterface;
+    use std::{thread, time};
+    use actix::registry::SystemRegistry;
+
     #[test]
-    fn it_works() {
-        assert_eq!(2 + 2, 4);
+    fn test_contact_neighbor_ipv4() {
+        let link_args = &["link"];
+        let link_add = &["link", "add", "wg1", "type", "wireguard"];
+
+        let mut counter = 0;
+        KI.set_mock(Box::new(move |program, args| {
+            assert_eq!(program, "ip");
+            counter += 1;
+
+            match counter {
+                1 => {
+                    assert_eq!(args, link_args);
+                    Ok(Output {
+                        stdout: b"82: wg0: <POINTOPOINT,NOARP> mtu 1420 qdisc noop state DOWN mode DEFAULT group default qlen 1000".to_vec(),
+                        stderr: b"".to_vec(),
+                        status: ExitStatus::from_raw(0),
+                    })
+                }
+                2 => {
+                    assert_eq!(args, link_add);
+                    Ok(Output {
+                        stdout: b"".to_vec(),
+                        stderr: b"".to_vec(),
+                        status: ExitStatus::from_raw(0),
+                    })
+                }
+                _ => panic!("command called too many times"),
+            }
+        }));
+
+        let sys = System::new("test");
+
+        let _: Addr<Syn, _> = HTTPClient::start_reg(|_| { HTTPClient::mock(Box::new(|msg, ctx| {
+            assert_eq!(msg.downcast_ref::<Hello>(), Some(&Hello{
+                my_id: LocalIdentity {
+                    wg_port: 60000,
+                    global: SETTING.get_identity()
+                },
+                to: SocketAddr::V4(SocketAddrV4::new("1.1.1.1".parse().unwrap(), 4876))
+            }));
+
+            let ret: Result<LocalIdentity, Error> = Ok(LocalIdentity{
+                wg_port: 60000,
+                global: SETTING.get_identity(),
+            });
+            Box::new(Some(ret))
+        }))});
+
+        let mut tm = TunnelManager::new();
+        let res = TunnelManager::contact_neighbor(tm.get_if(String::from("aa")), 0, "1.1.1.1".parse().unwrap());
+
+        sys.handle().spawn(res.then(|res| {
+            assert_eq!(res.unwrap(), (LocalIdentity{
+                wg_port: 60000,
+                global: SETTING.get_identity(),
+            }, "wg1".to_string(), "1.1.1.1".parse().unwrap()));
+
+            Arbiter::system().do_send(msgs::SystemExit(0));
+            future::result(Ok(()))
+        }));
+
+        sys.run();
     }
 }
