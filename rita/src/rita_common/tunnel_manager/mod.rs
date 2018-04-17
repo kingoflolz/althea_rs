@@ -3,8 +3,8 @@ use std::net::{IpAddr, SocketAddr, SocketAddrV6};
 use std::path::Path;
 
 use actix::actors;
-use actix::prelude::*;
 use actix::actors::mocker::Mocker;
+use actix::prelude::*;
 
 use futures;
 use futures::Future;
@@ -15,8 +15,8 @@ use KI;
 
 use babel_monitor::Babel;
 
-use rita_common::http_client::{Hello};
 use rita_common;
+use rita_common::http_client::Hello;
 
 use settings::RitaCommonSettings;
 use SETTING;
@@ -352,7 +352,6 @@ impl TunnelManager {
             Path::new(&SETTING.get_network().wg_private_key_path),
             &SETTING.get_network().own_ip,
             SETTING.get_network().external_nic.clone(),
-            SETTING.get_network().conf_link_local
         )?;
 
         let mut babel = Babel::new(&format!("[::1]:{}", SETTING.get_network().babel_port)
@@ -374,9 +373,9 @@ mod tests {
 
     use super::*;
 
+    use actix::registry::SystemRegistry;
     use althea_kernel_interface::KernelInterface;
     use std::{thread, time};
-    use actix::registry::SystemRegistry;
 
     #[test]
     fn test_contact_neighbor_ipv4() {
@@ -411,30 +410,46 @@ mod tests {
 
         let sys = System::new("test");
 
-        let _: Addr<Syn, _> = HTTPClient::start_reg(|_| { HTTPClient::mock(Box::new(|msg, ctx| {
-            assert_eq!(msg.downcast_ref::<Hello>(), Some(&Hello{
-                my_id: LocalIdentity {
-                    wg_port: 60000,
-                    global: SETTING.get_identity()
-                },
-                to: SocketAddr::V4(SocketAddrV4::new("1.1.1.1".parse().unwrap(), 4876))
-            }));
+        let _: Addr<Syn, _> = HTTPClient::start_reg(|_| {
+            HTTPClient::mock(Box::new(|msg, ctx| {
+                assert_eq!(
+                    msg.downcast_ref::<Hello>(),
+                    Some(&Hello {
+                        my_id: LocalIdentity {
+                            wg_port: 60000,
+                            global: SETTING.get_identity()
+                        },
+                        to: SocketAddr::V4(SocketAddrV4::new("1.1.1.1".parse().unwrap(), 4876))
+                    })
+                );
 
-            let ret: Result<LocalIdentity, Error> = Ok(LocalIdentity{
-                wg_port: 60000,
-                global: SETTING.get_identity(),
-            });
-            Box::new(Some(ret))
-        }))});
+                let ret: Result<LocalIdentity, Error> = Ok(LocalIdentity {
+                    wg_port: 60000,
+                    global: SETTING.get_identity(),
+                });
+                Box::new(Some(ret))
+            }))
+        });
 
         let mut tm = TunnelManager::new();
-        let res = TunnelManager::contact_neighbor(tm.get_if(String::from("aa")), 0, "1.1.1.1".parse().unwrap());
+        let res = TunnelManager::contact_neighbor(
+            tm.get_if(String::from("aa")),
+            0,
+            "1.1.1.1".parse().unwrap(),
+        );
 
         sys.handle().spawn(res.then(|res| {
-            assert_eq!(res.unwrap(), (LocalIdentity{
-                wg_port: 60000,
-                global: SETTING.get_identity(),
-            }, "wg1".to_string(), "1.1.1.1".parse().unwrap()));
+            assert_eq!(
+                res.unwrap(),
+                (
+                    LocalIdentity {
+                        wg_port: 60000,
+                        global: SETTING.get_identity(),
+                    },
+                    "wg1".to_string(),
+                    "1.1.1.1".parse().unwrap()
+                )
+            );
 
             Arbiter::system().do_send(msgs::SystemExit(0));
             future::result(Ok(()))

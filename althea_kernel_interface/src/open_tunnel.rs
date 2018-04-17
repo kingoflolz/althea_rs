@@ -10,9 +10,8 @@ fn to_wg_local(ip: &IpAddr) -> IpAddr {
         &IpAddr::V6(ip) => {
             let mut seg = ip.segments();
             assert_eq!((seg[0] & 0xfd00), 0xfd00);
-            seg[0] = 0xfe80;
             IpAddr::V6(Ipv6Addr::new(
-                seg[0], seg[1], seg[2], seg[3], seg[4], seg[5], seg[6], seg[7],
+                0xfe80, 0x0, 0x0, 0x0, seg[4], seg[5], seg[6], seg[7],
             ))
         }
         _ => unreachable!(),
@@ -35,11 +34,16 @@ fn is_link_local(ip: IpAddr) -> bool {
 }
 
 /// socket to string with interface id support
-fn socket_to_string(endpoint: &SocketAddr, interface_name: String) -> String {
+fn socket_to_string(endpoint: &SocketAddr, interface_name: Option<String>) -> String {
     match endpoint {
         &SocketAddr::V6(endpoint) => {
             if is_link_local(IpAddr::V6(endpoint.ip().clone())) {
-                format!("[{}%{}]:{}", endpoint.ip(), interface_name, endpoint.port())
+                format!(
+                    "[{}%{}]:{}",
+                    endpoint.ip(),
+                    interface_name.expect("Link local without interface"),
+                    endpoint.port()
+                )
             } else {
                 format!("[{}]:{}", endpoint.ip(), endpoint.port())
             }
@@ -60,10 +64,10 @@ impl KernelInterface {
         external_nic: Option<String>,
     ) -> Result<(), Error> {
         let phy_name = match self.get_device_name(endpoint.ip()) {
-            Ok(phy_name) => phy_name,
-            Err(err) => external_nic.unwrap_or("no_nic".to_string()),
+            Ok(phy_name) => Some(phy_name),
+            Err(err) => external_nic,
         };
-        let socket_connect_str = socket_to_string(endpoint, phy_name);
+        let socket_connect_str = socket_to_string(endpoint, phy_name.clone());
         trace!("socket conenct string: {}", socket_connect_str);
         let output = self.run_command(
             "wg",
@@ -95,7 +99,7 @@ impl KernelInterface {
             &["address", "add", &format!("{}", own_ip), "dev", &interface],
         )?;
 
-        let output = self.run_command(
+        self.run_command(
             "ip",
             &[
                 "address",

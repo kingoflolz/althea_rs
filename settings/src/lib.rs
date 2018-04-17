@@ -36,7 +36,7 @@ use althea_types::{EthAddress, ExitRegistrationDetails, Identity};
 
 use num256::Int256;
 
-use althea_kernel_interface::{KI, KernelInterface};
+use althea_kernel_interface::{KernelInterface, KI};
 
 use failure::Error;
 
@@ -54,7 +54,6 @@ pub struct NetworkSettings {
     pub wg_start_port: u16,
     pub peer_interfaces: HashSet<String>,
     pub manual_peers: Vec<String>,
-    pub conf_link_local: bool,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub external_nic: Option<String>,
 }
@@ -75,7 +74,6 @@ impl Default for NetworkSettings {
             peer_interfaces: HashSet::new(),
             manual_peers: Vec::new(),
             external_nic: None,
-            conf_link_local: true,
         }
     }
 }
@@ -138,11 +136,17 @@ pub struct ExitClientDetails {
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone, Eq, PartialEq, Default)]
+pub struct ExitTunnelSettings {
+    pub lan_nics: Vec<String>,
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone, Eq, PartialEq, Default)]
 pub struct RitaSettingsStruct {
     payment: PaymentSettings,
     network: NetworkSettings,
     #[serde(skip_serializing_if = "Option::is_none")]
     exit_client: Option<ExitClientSettings>,
+    exit_tunnel_settings: ExitTunnelSettings,
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone, Eq, PartialEq)]
@@ -213,7 +217,7 @@ impl RitaCommonSettings<RitaSettingsStruct> for Arc<RwLock<RitaSettingsStruct>> 
         Identity::new(
             self.get_network().own_ip.clone(),
             self.get_payment().eth_address.clone(),
-            self.get_network().wg_public_key.clone()
+            self.get_network().wg_public_key.clone(),
         )
     }
 }
@@ -247,7 +251,7 @@ impl RitaCommonSettings<RitaExitSettingsStruct> for Arc<RwLock<RitaExitSettingsS
         Identity::new(
             self.get_network().own_ip.clone(),
             self.get_payment().eth_address.clone(),
-            self.get_network().wg_public_key.clone()
+            self.get_network().wg_public_key.clone(),
         )
     }
 }
@@ -270,6 +274,10 @@ pub trait RitaClientSettings {
         &'me self,
     ) -> RwLockWriteGuardRefMut<'ret, RitaSettingsStruct, ExitClientDetails>;
     fn exit_client_details_is_set(&self) -> bool;
+
+    fn get_exit_tunnel_settings<'ret, 'me: 'ret>(
+        &'me self,
+    ) -> RwLockReadGuardRef<'ret, RitaSettingsStruct, ExitTunnelSettings>;
 }
 
 impl RitaClientSettings for Arc<RwLock<RitaSettingsStruct>> {
@@ -329,6 +337,12 @@ impl RitaClientSettings for Arc<RwLock<RitaSettingsStruct>> {
 
     fn exit_client_details_is_set(&self) -> bool {
         self.get_exit_client().details.is_some()
+    }
+
+    fn get_exit_tunnel_settings<'ret, 'me: 'ret>(
+        &'me self,
+    ) -> RwLockReadGuardRef<'ret, RitaSettingsStruct, ExitTunnelSettings> {
+        RwLockReadGuardRef::new(self.read().unwrap()).map(|g| &g.exit_tunnel_settings)
     }
 }
 

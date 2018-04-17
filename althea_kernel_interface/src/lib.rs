@@ -13,10 +13,10 @@ use std::borrow::BorrowMut;
 use std::cell::RefCell;
 use std::ffi::OsStr;
 use std::io::Write;
+use std::path::Path;
 use std::process::{Command, Output};
 use std::sync::{Arc, Mutex};
 use std::time::Instant;
-use std::path::Path;
 
 use std::str;
 
@@ -32,6 +32,7 @@ mod exit_server_tunnel;
 mod get_neighbors;
 mod get_wg_pubkey;
 mod interface_tools;
+mod ip_rule;
 mod link_local_tools;
 mod manipulate_uci;
 mod open_tunnel;
@@ -115,7 +116,7 @@ impl CommandRunner for TestCommandRunner {
     }
 }
 
-pub trait KernelInterface: CommandRunner + Sync{}
+pub trait KernelInterface: CommandRunner + Sync {}
 
-impl KernelInterface for LinuxCommandRunner{}
-impl KernelInterface for TestCommandRunner{}
+impl KernelInterface for LinuxCommandRunner {}
+impl KernelInterface for TestCommandRunner {}
